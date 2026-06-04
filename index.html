@@ -344,6 +344,15 @@
       #sidebar { position: relative; width: 230px; height: auto; float: left; box-shadow: none; }
       #map     { position: relative; width: calc(100% - 240px); height: 520px; float: left; }
     }
+        leaflet-image-layer,
+    .leaflet-layer img {
+        max-width: none !important;
+        width: auto !important;
+        height: auto !important;
+        box-shadow: none !important;     
+        background-color: transparent !important;
+        border: none !important;
+    }
   </style>
 </head>
 
