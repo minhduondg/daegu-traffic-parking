@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="대구대학교 경산캠퍼스 교통·주차 정보 내비게이션" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>대구대학교 교통·주차 내비게이션</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
+  <link rel="preconnect" href="https://unpkg.com" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── 토큰 ───────────────────────────────────────────────────────────── */
+    :root {
+      --bg-base:      #0d1117;
+      --bg-panel:     #161b22;
+      --bg-panel-alt: #1c2128;
+      --border:       #30363d;
+      --border-sub:   #21262d;
+      --text-pri:     #e6edf3;
+      --text-sec:     #8b949e;
+      --text-dim:     #484f58;
+      --amber-lt:     #f59e0b;
+      --emerald-lt:   #10b981;
+      --red-lt:       #ef4444;
+      --orange-lt:    #f97316;
+      --blue:         #1f6feb;
+      --blue-lt:      #60a5fa;
+      --violet-lt:    #a78bfa;
+      --sb-w:         296px;
+      --r:            3px;
+      
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-pri);
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    [x-cloak] { display: none !important; }
+
+    /* ── 로딩 스크린 ─────────────────────────────────────────────────────── */
+    #loading {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg-base);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+      transition: opacity 0.5s, visibility 0.5s;
+    }
+    #loading.done { opacity: 0; visibility: hidden; pointer-events: none; }
+    .ld-sup {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--text-dim);
+      border: 1px solid var(--border); padding: 3px 10px; border-radius: var(--r);
+    }
+    .ld-title { font-size: 17px; font-weight: 700; color: var(--text-pri); }
+    .ld-sub   { font-size: 11px; color: var(--text-sec); }
+    .ld-bar   { width: 140px; height: 2px; background: var(--border-sub); border-radius: 1px; overflow: hidden; }
+    .ld-fill  { height: 100%; background: var(--blue-lt); animation: ld 1.6s ease-in-out forwards; }
+    @keyframes ld { 0%{width:0} 60%{width:65%} 100%{width:100%} }
+
+    /* ── 지도 ───────────────────────────────────────────────────────────── */
+    #map { position: fixed; inset: 0; z-index: 1; }
+
+    .leaflet-tile-pane { filter: saturate(0.5) brightness(0.62); }
+
+    .leaflet-bgOverlay-pane img {
+      filter: drop-shadow(0 0 18px rgba(0,0,0,.85));
+    }
+    .leaflet-control-zoom {
+      border: 1px solid var(--border) !important;
+      border-radius: var(--r) !important;
+    }
+    .leaflet-control-zoom a {
+      background: var(--bg-panel) !important;
+      color: var(--text-sec) !important;
+      border-bottom: 1px solid var(--border) !important;
+      line-height: 26px !important;
+      transition: background .1s, color .1s;
+    }
+    .leaflet-control-zoom a:hover { background: var(--bg-panel-alt) !important; color: var(--text-pri) !important; }
+    .leaflet-control-attribution {
+      background: rgba(13,17,23,.88) !important;
+      color: var(--text-dim) !important;
+      font-size: 9px !important;
+    }
+    .leaflet-control-scale-line {
+      background: rgba(13,17,23,.85) !important;
+      border: 1px solid var(--border) !important;
+      border-top: none !important;
+      color: var(--text-sec) !important;
+      font-size: 9px !important;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* 건물 라벨 (Permanent tooltip) */
+    .bld-label {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: rgba(230,237,243,.75) !important;
+      font-size: 9px !important;
+      font-weight: 600 !important;
+      font-family: 'Inter', sans-serif;
+      white-space: nowrap;
+      text-shadow: 0 0 5px rgba(0,0,0,.9), 0 0 10px rgba(0,0,0,.7);
+      padding: 0 !important;
+      pointer-events: none !important;
+    }
+    .bld-label::before { display: none !important; }
+
+    /* 일방통행 애니메이션 대시 */
+    .ow-animated {
+      stroke-dasharray: 14 7;
+      animation: dash-flow 1.6s linear infinite;
+    }
+    @keyframes dash-flow { to { stroke-dashoffset: -21; } }
+
+    /* 위험 마커 펄스 */
+    @keyframes pulse-ring {
+      0%   { transform: scale(.85); opacity: .7; }
+      100% { transform: scale(2.4); opacity: 0; }
+    }
+
+    /* ── 팝업 ───────────────────────────────────────────────────────────── */
+    .leaflet-popup-content-wrapper {
+      background: var(--bg-panel) !important;
+      border: 1px solid var(--border) !important;
+      border-radius: var(--r) !important;
+      box-shadow: 0 8px 32px rgba(0,0,0,.8) !important;
+      color: var(--text-pri) !important;
+      font-family: 'Inter', sans-serif;
+    }
+    .leaflet-popup-content { margin: 14px 16px !important; min-width: 210px; }
+    .leaflet-popup-tip { background: var(--bg-panel) !important; }
+    .leaflet-popup-close-button { color: var(--text-dim) !important; font-size: 16px !important; top: 8px !important; right: 10px !important; }
+    .leaflet-popup-close-button:hover { color: var(--text-pri) !important; }
+
+    .pu-title  { font-size: 12px; font-weight: 700; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--border-sub); letter-spacing: .02em; }
+    .pu-row    { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; gap: 12px; }
+    .pu-key    { font-size: 10px; color: var(--text-sec); white-space: nowrap; }
+    .pu-val    { font-family: 'JetBrains Mono', monospace; font-size: 11px; text-align: right; }
+    .pu-bar    { height: 3px; background: var(--border-sub); border-radius: 2px; margin: 6px 0 2px; overflow: hidden; }
+    .pu-bar-f  { height: 100%; border-radius: 2px; }
+    .pu-note   { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-sub); font-size: 10px; color: var(--text-sec); line-height: 1.6; }
+    .pu-nl     { display: block; font-size: 9px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 3px; }
+
+    /* ── 사이드바 ────────────────────────────────────────────────────────── */
+    #sidebar {
+      position: fixed; top: 0; left: 0;
+      height: 100dvh; width: var(--sb-w);
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border);
+      z-index: 1000;
+      display: flex; flex-direction: column;
+      transition: transform .22s cubic-bezier(.4,0,.2,1);
+      will-change: transform;
+    }
+    #sidebar.closed { transform: translateX(calc(-1 * var(--sb-w))); }
+
+    .sb-hd {
+      padding: 13px 16px 11px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-base);
+      flex-shrink: 0;
+    }
+    .sb-sup   { font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 2px; }
+    .sb-title { font-size: 13px; font-weight: 700; line-height: 1.3; }
+
+    .clock-row  { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+    .clock      { font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600; letter-spacing: .04em; line-height: 1; }
+    .date-str   { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+    .peak-chip  { display: inline-flex; align-items: center; gap: 4px; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; padding: 3px 7px; border-radius: var(--r); line-height: 1; }
+    .peak-chip.on  { background: rgba(220,38,38,.12); color: var(--red-lt); border: 1px solid rgba(220,38,38,.3); }
+    .peak-chip.off { background: var(--bg-panel-alt); color: var(--text-dim); border: 1px solid var(--border-sub); }
+    .peak-dot   { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .peak-chip.on .peak-dot { animation: blink 1.2s step-start infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .sb-body { flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+    .sb-body::-webkit-scrollbar { width: 3px; }
+    .sb-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .sb-sec { padding: 10px 16px; border-bottom: 1px solid var(--border-sub); }
+    .sb-sec:last-child { border-bottom: none; }
+    .sec-lbl { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+
+    /* 요약 카드 */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .stat-card { background: var(--bg-panel-alt); border: 1px solid var(--border-sub); border-radius: var(--r); padding: 6px 10px; }
+    .sc-lbl    { font-size: 9px; color: var(--text-dim); margin-bottom: 2px; }
+    .sc-val    { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; }
+    .sc-val.g  { color: var(--emerald-lt); }
+    .sc-val.y  { color: var(--amber-lt); }
+    .sc-val.r  { color: var(--red-lt); }
+
+    /* 레이어 토글 */
+    .lyr-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; cursor: pointer; user-select: none; }
+    .lyr-row:hover .lyr-name { color: var(--text-pri); }
+    .lyr-lhs { display: flex; align-items: center; gap: 8px; }
+    .lyr-pip  { width: 8px; height: 8px; border-radius: 1px; flex-shrink: 0; }
+    .lyr-name { font-size: 12px; font-weight: 500; color: var(--text-sec); transition: color .1s; }
+    .sw { width: 30px; height: 17px; border-radius: 9px; position: relative; transition: background .15s; flex-shrink: 0; }
+    .sw.on  { background: var(--blue); border: 1px solid var(--blue); }
+    .sw.off { background: var(--bg-panel-alt); border: 1px solid var(--border); }
+    .sw-k   { position: absolute; top: 2px; width: 11px; height: 11px; border-radius: 6px; background: #fff; transition: left .15s; }
+    .sw.on  .sw-k { left: 15px; }
+    .sw.off .sw-k { left: 2px; }
+
+    /* 주차장 */
+    .lot { padding: 7px 0; border-bottom: 1px solid var(--border-sub); cursor: pointer; }
+    .lot:last-child { border-bottom: none; }
+    .lot:hover .lot-name { color: var(--blue-lt); }
+    .lot-top  { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
+    .lot-name { font-size: 11px; font-weight: 600; line-height: 1.3; max-width: 168px; transition: color .1s; }
+    .badge { font-size: 8px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; padding: 2px 5px; border-radius: var(--r); flex-shrink: 0; }
+    .bp { background: rgba(239,68,68,.15);  color: var(--red-lt);     border: 1px solid rgba(239,68,68,.3); }
+    .bm { background: rgba(245,158,11,.15); color: var(--amber-lt);   border: 1px solid rgba(245,158,11,.3); }
+    .be { background: rgba(16,185,129,.15); color: var(--emerald-lt); border: 1px solid rgba(16,185,129,.3); }
+    .lot-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+    .lot-cnt  { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-sec); }
+    .lot-tag  { font-size: 9px; color: var(--text-dim); background: var(--bg-panel-alt); padding: 1px 5px; border-radius: 2px; }
+    .sat-bar  { height: 3px; background: var(--border-sub); border-radius: 2px; overflow: hidden; }
+    .sat-fill { height: 100%; border-radius: 2px; transition: width .8s ease; }
+
+    /* 출입문 */
+    .gate-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-sub); }
+    .gate-row:last-child { border-bottom: none; }
+    .gate-lhs { display: flex; align-items: center; gap: 8px; }
+    .gate-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .gate-name { font-size: 11px; font-weight: 600; }
+    .gate-dir  { font-size: 9px; color: var(--text-dim); margin-top: 1px; }
+
+    /* 인사이트 */
+    .insight  { padding: 7px 0; border-bottom: 1px solid var(--border-sub); cursor: pointer; }
+    .insight:last-child { border-bottom: none; }
+    .insight:hover .ins-name { color: var(--blue-lt); }
+    .ins-loc  { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+    .ins-dot  { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .ins-name { font-size: 11px; font-weight: 600; transition: color .1s; }
+    .ins-rec  { font-size: 10px; color: var(--text-sec); line-height: 1.55; padding-left: 12px; }
+
+    /* 범례 */
+    .leg { display: flex; align-items: center; gap: 7px; padding: 2px 0; font-size: 10px; color: var(--text-sec); }
+    .leg-ln { width: 18px; height: 0; flex-shrink: 0; }
+    .leg-sq { width: 9px; height: 9px; flex-shrink: 0; border-radius: 1px; }
+    .leg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
+
+    /* ── 사이드바 토글 ────────────────────────────────────────────────────── */
+    #sb-btn {
+      position: fixed; top: 16px; z-index: 1001;
+      width: 32px; height: 32px;
+      background: var(--bg-panel); border: 1px solid var(--border);
+      color: var(--text-sec);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; border-radius: var(--r);
+      transition: left .22s cubic-bezier(.4,0,.2,1), background .1s, color .1s;
+    }
+    #sb-btn:hover { background: var(--bg-panel-alt); color: var(--text-pri); }
+    #sb-btn:focus-visible { outline: 2px solid var(--blue-lt); outline-offset: 2px; }
+
+    /* ── 툴바 ────────────────────────────────────────────────────────────── */
+    #toolbar { position: fixed; top: 16px; right: 48px; z-index: 1000; display: flex; gap: 5px; }
+    .tb-btn {
+      width: 32px; height: 32px;
+      background: var(--bg-panel); border: 1px solid var(--border);
+      color: var(--text-sec);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; border-radius: var(--r);
+      transition: background .1s, color .1s;
+    }
+    .tb-btn:hover { background: var(--bg-panel-alt); color: var(--text-pri); }
+
+    /* ── 정보 패널 ───────────────────────────────────────────────────────── */
+    #info-panel {
+      position: fixed; bottom: 32px; right: 16px; z-index: 1000;
+      background: var(--bg-panel); border: 1px solid var(--border);
+      padding: 12px 14px; width: 196px; border-radius: var(--r);
+    }
+    .ip-lbl { font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+    .ip-row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; }
+    .ip-k   { font-size: 10px; color: var(--text-sec); }
+    .ip-v   { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+    .ip-div { height: 1px; background: var(--border-sub); margin: 6px 0; }
+    .ip-bar { height: 4px; background: var(--border-sub); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .ip-fill{ height: 100%; border-radius: 2px; transition: width .8s, background .4s; }
+
+    /* ── 경로 배너 ───────────────────────────────────────────────────────── */
+    #route-banner {
+      position: fixed; top: 16px; z-index: 999;
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-left: 3px solid var(--amber-lt);
+      padding: 8px 12px; max-width: 238px; border-radius: var(--r);
+      transition: left .22s cubic-bezier(.4,0,.2,1), opacity .2s, visibility .2s;
+    }
+    #route-banner.hidden { opacity: 0; visibility: hidden; }
+    .rb-title { font-size: 10px; font-weight: 700; color: var(--amber-lt); margin-bottom: 3px; }
+    .rb-desc  { font-size: 10px; color: var(--text-sec); line-height: 1.55; }
+
+    /* ── 토스트 ──────────────────────────────────────────────────────────── */
+    #toast-area { position: fixed; bottom: 76px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+    .toast {
+      background: var(--bg-panel); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 9px 16px;
+      font-size: 11px; box-shadow: 0 8px 24px rgba(0,0,0,.6);
+      animation: t-in .2s ease, t-out .25s ease 2.75s forwards;
+      white-space: nowrap;
+    }
+    .toast.warn { border-left: 3px solid var(--amber-lt); }
+    @keyframes t-in  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+    @keyframes t-out { from { opacity:1; } to { opacity:0; transform:translateY(-4px); } }
+
+    /* ── 모바일 ──────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      :root { --sb-w: 100vw; }
+      #sidebar {
+        top: auto; bottom: 0; left: 0; right: 0;
+        height: 58vh; width: 100%;
+        border-right: none; border-top: 1px solid var(--border);
+        border-radius: 12px 12px 0 0;
+        transform: none !important;
+      }
+      #sidebar.closed { transform: translateY(calc(58vh - 46px)) !important; }
+      #sb-btn  { top: auto; bottom: 58vh; left: 50%; transform: translateX(-50%) !important; }
+      #info-panel { bottom: calc(58vh + 8px); right: 8px; width: 175px; }
+      #route-banner { top: 8px; right: 56px; max-width: none; }
+      #toolbar { right: 8px; }
+    }
+
+    /* ── 인쇄 ────────────────────────────────────────────────────────────── */
+    @media print {
+      #sb-btn, #toolbar, #route-banner, #toast-area, #loading { display: none; }
+      #sidebar { position: relative; width: 230px; height: auto; float: left; box-shadow: none; }
+      #map     { position: relative; width: calc(100% - 240px); height: 520px; float: left; }
+    }
+  </style>
+</head>
+
+<body>
+
+<!-- 로딩 스크린 -->
+<div id="loading">
+  <div class="ld-sup">대구대학교 경산캠퍼스</div>
+  <div class="ld-title">교통·주차 내비게이션</div>
+  <div class="ld-sub">지도 데이터 불러오는 중…</div>
+  <div class="ld-bar"><div class="ld-fill"></div></div>
+</div>
+
+<div id="app-root" x-data="app()" x-init="init()" x-cloak>
+
+  <div id="map" role="application" aria-label="대구대학교 캠퍼스 지도"></div>
+
+  <!-- 사이드바 토글 -->
+  <button id="sb-btn"
+    :style="open ? 'left:' + (296+8) + 'px' : 'left:16px'"
+    @click="toggleSidebar()"
+    :aria-expanded="open.toString()"
+    aria-label="사이드바 열고 닫기"
+    title="사이드바 (단축키: [)">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="square">
+      <path d="M3 6h18M3 12h18M3 18h18"/>
+    </svg>
+  </button>
+
+  <!-- 툴바 -->
+  <div id="toolbar" role="toolbar" aria-label="지도 도구">
+    <button class="tb-btn" @click="locateMe()" title="내 위치 (단축키: L)" aria-label="내 위치 표시">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+    </button>
+    <button class="tb-btn" @click="resetView()" title="전체 보기 (단축키: R)" aria-label="캠퍼스 전체 보기">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 .01 0"/><polyline points="3 7 3 12 8 12"/></svg>
+    </button>
+  </div>
+
+  <!-- 사이드바 -->
+  <aside id="sidebar" :class="open ? '' : 'closed'" role="complementary" aria-label="교통 정보 패널">
+
+    <div class="sb-hd">
+      <div class="sb-sup">대구대학교 경산캠퍼스</div>
+      <div class="sb-title">교통·주차 내비게이션</div>
+      <div class="clock-row">
+        <span class="clock" x-text="clock" aria-live="polite" aria-label="현재 시각"></span>
+        <span class="peak-chip" :class="isPeak ? 'on' : 'off'" :aria-label="isPeak ? '혼잡시간 진행 중' : '평시'">
+          <span class="peak-dot" aria-hidden="true"></span>
+          <span x-text="isPeak ? '혼잡시간' : '평시'"></span>
+        </span>
+      </div>
+      <div class="date-str" x-text="dateStr" aria-label="날짜"></div>
+    </div>
+
+    <div class="sb-body">
+
+      <!-- 캠퍼스 요약 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">캠퍼스 현황</div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="sc-lbl">전체 주차면</div>
+            <div class="sc-val" x-text="totalSpaces + '면'"></div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-lbl">포화율</div>
+            <div class="sc-val" :class="satPct>80?'r':satPct>60?'y':'g'" x-text="satPct+'%'"></div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-lbl">혼잡 출입문</div>
+            <div class="sc-val y" x-text="gates.filter(g=>g.cong==='high').length+'개'"></div>
+          </div>
+          <div class="stat-card">
+            <div class="sc-lbl">위험 구간</div>
+            <div class="sc-val r" x-text="insights.filter(i=>i.risk==='critical'||i.risk==='high').length+'개소'"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 레이어 제어 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">레이어</div>
+        <template x-for="lyr in layerDefs" :key="lyr.key">
+          <div class="lyr-row" @click="toggleLayer(lyr.key)"
+               role="switch" :aria-checked="layers[lyr.key].toString()" tabindex="0"
+               @keydown.enter.prevent="toggleLayer(lyr.key)"
+               @keydown.space.prevent="toggleLayer(lyr.key)">
+            <div class="lyr-lhs">
+              <div class="lyr-pip" :style="`background:${lyr.color}`"></div>
+              <span class="lyr-name" x-text="lyr.label"></span>
+            </div>
+            <div class="sw" :class="layers[lyr.key] ? 'on' : 'off'" aria-hidden="true"><div class="sw-k"></div></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 주차장 포화도 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">주차장 포화도</div>
+        <template x-for="lot in lots" :key="lot.id">
+          <div class="lot" @click="focusParking(lot.id)" :title="lot.name+' 위치 보기'">
+            <div class="lot-top">
+              <div class="lot-name" x-text="lot.name"></div>
+              <span class="badge" :class="lot.status==='peak'?'bp':lot.status==='moderate'?'bm':'be'"
+                x-text="lot.status==='peak'?'혼잡':lot.status==='moderate'?'보통':'여유'"></span>
+            </div>
+            <div class="lot-meta">
+              <span class="lot-cnt" x-text="lot.occ+'/'+lot.total+'면'"></span>
+              <span class="lot-tag" x-text="'EV '+lot.ev+'기'"></span>
+              <template x-if="lot.shuttle"><span class="lot-tag">셔틀 정류장</span></template>
+            </div>
+            <div class="sat-bar">
+              <div class="sat-fill" :style="`width:${Math.round(lot.occ/lot.total*100)}%;background:${lot.status==='peak'?'#ef4444':lot.status==='moderate'?'#f59e0b':'#10b981'}`"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 출입문 상태 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">출입문 상태</div>
+        <template x-for="g in gates" :key="g.id">
+          <div class="gate-row">
+            <div class="gate-lhs">
+              <div class="gate-dot" :style="`background:${g.cong==='high'?'#ef4444':g.cong==='mid'?'#f59e0b':'#10b981'}`"></div>
+              <div>
+                <div class="gate-name" x-text="g.name"></div>
+                <div class="gate-dir" x-text="g.dir"></div>
+              </div>
+            </div>
+            <span class="badge" :class="g.cong==='high'?'bp':g.cong==='mid'?'bm':'be'"
+              x-text="g.cong==='high'?'혼잡':g.cong==='mid'?'보통':'원활'"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- 교통 안전 분석 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">교통 안전 분석</div>
+        <template x-for="ins in insights" :key="ins.id">
+          <div class="insight" @click="focusInsight(ins.id)">
+            <div class="ins-loc">
+              <div class="ins-dot" :style="`background:${ins.risk==='critical'?'#ef4444':ins.risk==='high'?'#f97316':'#f59e0b'}`"></div>
+              <span class="ins-name" x-text="ins.loc"></span>
+            </div>
+            <div class="ins-rec" x-text="ins.rec"></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 범례 -->
+      <div class="sb-sec">
+        <div class="sec-lbl">범례</div>
+        <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;">
+          <div class="leg"><div class="leg-ln" style="border-top:3px solid #60a5fa"></div><span>양방향 통행로</span></div>
+          <div class="leg"><div class="leg-ln" style="border-top:3px dashed #f59e0b"></div><span>일방통행 구간</span></div>
+          <div class="leg"><div class="leg-ln" style="border-top:3px solid #ef4444"></div><span>고위험 구간</span></div>
+          <div class="leg"><div class="leg-ln" style="border-top:3px solid #10b981"></div><span>권장 우회로</span></div>
+        </div>
+        <div class="leg-grid">
+          <div class="leg"><div class="leg-sq" style="background:rgba(239,68,68,.35);border:1px solid #ef4444"></div><span>혼잡 주차장</span></div>
+          <div class="leg"><div class="leg-sq" style="background:rgba(245,158,11,.35);border:1px solid #f59e0b"></div><span>보통 주차장</span></div>
+          <div class="leg"><div class="leg-sq" style="background:rgba(16,185,129,.35);border:1px solid #10b981"></div><span>여유 주차장</span></div>
+          <div class="leg"><div class="leg-sq" style="background:rgba(167,139,250,.35);border:1px solid #a78bfa"></div><span>셔틀 정류장</span></div>
+        </div>
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border-sub);font-size:9px;color:var(--text-dim);line-height:1.9;">
+          폴리곤·라인 클릭 → 상세 정보<br>
+          ! 마커 클릭 → 전문가 권고<br>
+          단축키: <kbd style="font-family:JetBrains Mono,monospace">[</kbd> 사이드바 &nbsp;
+          <kbd style="font-family:JetBrains Mono,monospace">R</kbd> 초기화 &nbsp;
+          <kbd style="font-family:JetBrains Mono,monospace">L</kbd> 내 위치
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- 정보 패널 -->
+  <div id="info-panel" role="status" aria-label="주차 현황">
+    <div class="ip-lbl">주차 현황</div>
+    <div class="ip-row">
+      <span class="ip-k">사용 중</span>
+      <span class="ip-v" x-text="totalOcc+' / '+totalSpaces+'면'"></span>
+    </div>
+    <div class="ip-bar">
+      <div class="ip-fill" :style="`width:${satPct}%;background:${satPct>80?'#ef4444':satPct>60?'#f59e0b':'#10b981'}`"></div>
+    </div>
+    <div class="ip-div"></div>
+    <div class="ip-row">
+      <span class="ip-k">갱신</span>
+      <span class="ip-v" x-text="clock"></span>
+    </div>
+  </div>
+
+  <!-- 혼잡시간 경로 배너 -->
+  <div id="route-banner"
+    :class="isPeak ? '' : 'hidden'"
+    :style="open ? 'left:'+(296+16)+'px' : 'left:56px'"
+    role="alert" aria-live="polite">
+    <div class="rb-title">● 혼잡시간 권장 경로</div>
+    <div class="rb-desc">서문 진입 → 외곽 순환로 → 공과대·사범대 방면<br>중앙 도로 이용 시 예상 +12분</div>
+  </div>
+
+  <!-- 토스트 -->
+  <div id="toast-area" aria-live="assertive" aria-atomic="true"></div>
+
+</div><!-- /app-root -->
+
+<!-- ── 스크립트 ────────────────────────────────────────────────────────────── -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// 상수
+// ═══════════════════════════════════════════════════════════════════════════
+const CAMPUS_CENTER  = [35.8897, 128.7584];
+const OVERLAY_BOUNDS = [[35.88292, 128.7490], [35.89648, 128.7660]];
+const MAX_BOUNDS     = [[35.875,   128.744 ], [35.904,   128.769 ]];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GeoJSON — 주차장
+// ═══════════════════════════════════════════════════════════════════════════
+const PARKING_GEOJSON = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: {
+        id: 'P1', name: '공과대학 주차장', zone: '공과대학',
+        total: 180, occ: 148, status: 'peak',
+        disabled: 8, ev: 4, shuttle: false,
+        peak_hours: ['08:30–09:30', '17:30–18:30'],
+        gates: ['동문']
+      },
+      geometry: { type: 'Polygon', coordinates: [[[128.7591,35.8890],[128.7603,35.8890],[128.7603,35.8880],[128.7591,35.8880],[128.7591,35.8890]]] }
+    },
+    {
+      type: 'Feature',
+      properties: {
+        id: 'P2', name: '사회과학대학 주차장', zone: '사회과학대학',
+        total: 120, occ: 75, status: 'moderate',
+        disabled: 5, ev: 2, shuttle: false,
+        peak_hours: ['09:00–10:00', '13:00–14:00'],
+        gates: ['정문', '동문']
+      },
+      geometry: { type: 'Polygon', coordinates: [[[128.7613,35.8878],[128.7625,35.8878],[128.7625,35.8868],[128.7613,35.8868],[128.7613,35.8878]]] }
+    },
+    {
+      type: 'Feature',
+      properties: {
+        id: 'P3', name: '사범대학 주차장', zone: '사범대학',
+        total: 95, occ: 32, status: 'empty',
+        disabled: 4, ev: 2, shuttle: true,
+        peak_hours: ['08:30–09:00'],
+        gates: ['정문']
+      },
+      geometry: { type: 'Polygon', coordinates: [[[128.7534,35.8888],[128.7546,35.8888],[128.7546,35.8878],[128.7534,35.8878],[128.7534,35.8888]]] }
+    },
+    {
+      type: 'Feature',
+      properties: {
+        id: 'P4', name: '본관·행정동 주차장', zone: '본관',
+        total: 200, occ: 170, status: 'peak',
+        disabled: 12, ev: 6, shuttle: true,
+        peak_hours: ['08:00–10:00', '16:30–18:00'],
+        gates: ['정문', '서문']
+      },
+      geometry: { type: 'Polygon', coordinates: [[[128.7519,35.8933],[128.7531,35.8933],[128.7531,35.8923],[128.7519,35.8923],[128.7519,35.8933]]] }
+    },
+    {
+      type: 'Feature',
+      properties: {
+        id: 'P5', name: '학생복지관 주차장', zone: '복지관',
+        total: 80, occ: 48, status: 'moderate',
+        disabled: 4, ev: 2, shuttle: true,
+        peak_hours: ['11:30–13:30'],
+        gates: ['정문']
+      },
+      geometry: { type: 'Polygon', coordinates: [[[128.7583,35.8868],[128.7595,35.8868],[128.7595,35.8858],[128.7583,35.8858],[128.7583,35.8868]]] }
+    }
+  ]
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GeoJSON — 교통 흐름
+// ═══════════════════════════════════════════════════════════════════════════
+const TRAFFIC_GEOJSON = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: { id:'T1', name:'정문 진입로', dir:'진입 (일방)', one_way:true, risk:1.8, vol:'높음', desc:'남단 정문에서 내부 분기점(회전교차로 A)까지 진입 전용 도로. 08:30–09:30 최대 혼잡.' },
+      geometry: { type:'LineString', coordinates:[[128.7577,35.8836],[128.7577,35.8842],[128.7577,35.8848],[128.7577,35.8854]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T2', name:'정문 출구로', dir:'출구 (일방)', one_way:true, risk:1.5, vol:'높음', desc:'정문 출구 전용 차선. 17:30–18:30 최대 혼잡.' },
+      geometry: { type:'LineString', coordinates:[[128.7578,35.8854],[128.7577,35.8848],[128.7577,35.8842],[128.7577,35.8836]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T3', name:'정문–서문 연결로', dir:'양방향', one_way:false, risk:1.2, vol:'중간', desc:'분기점(회전교차로 A)에서 서문(서단)까지 이어지는 캠퍼스 서쪽 연결 도로.' },
+      geometry: { type:'LineString', coordinates:[[128.7577,35.8854],[128.7561,35.8863],[128.7544,35.8873],[128.7524,35.8879],[128.7507,35.8886]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T4', name:'동서 관통 간선 서쪽 구간', dir:'동향 (일방)', one_way:true, risk:2.1, vol:'높음', desc:'서문(10%,58%)→(17%,54%)→Node4(30%,49%)→(45%,46%)→Node3(57%,53%) 물결형 동서 간선. 보행자-차량 충돌 최고위험 구역.' },
+      geometry: { type:'LineString', coordinates:[[128.7507,35.8886],[128.7519,35.8892],[128.7541,35.8897],[128.7567,35.8902],[128.7587,35.8893]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T5', name:'동서 관통 간선 동쪽 구간', dir:'양방향', one_way:false, risk:1.6, vol:'중간', desc:'Node3(57%,53%)→(68%,51%) 야구장 진입→(82%,46%) 동부 분기로→동문(95%,48%). 수업 전환 집중 혼잡.' },
+      geometry: { type:'LineString', coordinates:[[128.7587,35.8893],[128.7606,35.8896],[128.7629,35.8902],[128.7652,35.8900]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T6', name:'남북 주간선 북쪽 연장', dir:'양방향', one_way:false, risk:0.9, vol:'낮음', desc:'Node2(51%,82%)→굴곡점(54%,68%)→Node3(57%,53%)→북쪽 녹지 끝점(59%,40%). 캠퍼스를 수직으로 관통하는 메인 남북 척추 도로.' },
+      geometry: { type:'LineString', coordinates:[[128.7577,35.8854],[128.7582,35.8872],[128.7587,35.8893],[128.7590,35.8911]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T7', name:'북서부 호수 순환로', dir:'양방향', one_way:false, risk:0.7, vol:'낮음', desc:'Node4(30%,49%)→북서 방향(25%,39%)→북서부 호수 외곽 곡선 구간(20%~24%,25%~33%)→북단 끝점(20%,20%). 캠퍼스 내 저속 이면도로.' },
+      geometry: { type:'LineString', coordinates:[[128.7541,35.8897],[128.7533,35.8912],[128.7527,35.8921],[128.7524,35.8929],[128.7524,35.8938]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T8', name:'북동부 외곽 연결로', dir:'양방향', one_way:false, risk:0.8, vol:'낮음', desc:'남북 주간선 북단(59%,40%)에서 동쪽 분기점(82%,46%)을 경유하여 동문(95%,48%)으로 연결되는 북동부 우회 도로.' },
+      geometry: { type:'LineString', coordinates:[[128.7590,35.8911],[128.7606,35.8903],[128.7629,35.8902],[128.7652,35.8900]] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'T9', name:'동남부 격자 루프선', dir:'양방향', one_way:false, risk:1.4, vol:'중간', desc:'Node2(51%,82%) 동쪽 분기→(65%,83%) 모퉁이→북향(65%,72%)→(63%,58%) 중앙 로터리 동측 합류. 건물 블록 사이 격자 이면도로.' },
+      geometry: { type:'LineString', coordinates:[[128.7577,35.8854],[128.7601,35.8852],[128.7601,35.8867],[128.7597,35.8886]] }
+    }
+  ]
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GeoJSON — 위험 인사이트
+// ═══════════════════════════════════════════════════════════════════════════
+const INSIGHT_GEOJSON = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: { id:'I1', loc:'복지관 앞 횡단보도', type:'보행자 충돌', risk:'critical', ci:9.2, incidents:3, peak:['08:50–09:10','11:50–12:10','17:50–18:10'], rec:'신호등 설치 또는 15 km/h 강제 감속 구간 지정 필요. 속도저감 노면표시 적용 권고.', related:'T4' },
+      geometry: { type:'Point', coordinates:[128.7541, 35.8895] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'I2', loc:'중앙–동문 도로 병목', type:'병목 구간', risk:'high', ci:6.8, incidents:1, peak:['08:55–09:05','09:55–10:05','10:55–11:05'], rec:'수업 전환 시 우회 임시 안내판 설치. 중장기: VMS 전자 교통 안내판 도입 검토.', related:'T5' },
+      geometry: { type:'Point', coordinates:[128.7597, 35.8886] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'I3', loc:'정문 분기 사거리', type:'교차로 충돌', risk:'high', ci:7.1, incidents:2, peak:['08:30–09:30'], rec:'정문 진입 분기점(회전교차로 A) 혼잡. 교통 유도원 배치 권고.', related:'T1,T2,T3' },
+      geometry: { type:'Point', coordinates:[128.7577, 35.8854] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'I4', loc:'서문 북부 경사로 구간', type:'기상 위험', risk:'moderate', ci:4.2, incidents:0, peak:['동절기 07:00–09:00 (결빙 시)'], rec:'동절기 결빙 취약 구간. 노면 열선 또는 자동 염화칼슘 살포 장치 검토.', related:'T6' },
+      geometry: { type:'Point', coordinates:[128.7519, 35.8889] }
+    },
+    {
+      type: 'Feature',
+      properties: { id:'I5', loc:'동문 전방 접근로', type:'우회 대안', risk:'low', ci:1.5, incidents:0, peak:['08:30–09:30 (정문 혼잡 시)'], rec:'정문 포화 시 동문 경유 공과대학 직통 경로. 우측 통행 유도선 도색 권고.', related:'T5,T9' },
+      geometry: { type:'Point', coordinates:[128.7629, 35.8902] }
+    }
+  ]
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 셔틀 정류장
+// ═══════════════════════════════════════════════════════════════════════════
+const SHUTTLE_STOPS = [
+  { id:'S1', name:'본관 정류장',   ll:[35.8928, 128.7523], routes:['A노선','C노선'], interval:15 },
+  { id:'S2', name:'복지관 정류장', ll:[35.8862, 128.7587], routes:['A노선','B노선'], interval:15 },
+  { id:'S3', name:'사범대 정류장', ll:[35.8881, 128.7541], routes:['B노선'],         interval:30 },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 건물 POI
+// ═══════════════════════════════════════════════════════════════════════════
+const BUILDINGS = [
+  { name:'본관',       ll:[35.8929, 128.7525] },  // NW cluster [1.8~3.5,1.8~4.5] 북단
+  { name:'도서관',     ll:[35.8910, 128.7545] },  // NW cluster 남부 [2.5~3.2,3.1~4.2]
+  { name:'학생복지관', ll:[35.8863, 128.7589] },  // 하단 로터리 서측 [5.6~6.2,7.2~8.2]
+  { name:'공과대학',   ll:[35.8888, 128.7593] },  // 상부 동측 밀집 [5.8~6.3,5.3~6.2]
+  { name:'사범대학',   ll:[35.8883, 128.7539] },  // Geo-3 축구장 동측 인접 (2.9,5.9)
+  { name:'사회과학대', ll:[35.8873, 128.7619] },  // 동측 외곽 독립 구역 [7.5~9.3,6.0~7.6]
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Alpine 앱
+// ═══════════════════════════════════════════════════════════════════════════
+document.addEventListener('alpine:init', () => {
+  Alpine.data('app', () => ({
+    open: true,
+    clock: '--:--',
+    dateStr: '',
+    isPeak: false,
+    mapObj: null,
+    mapLayers: {},
+    arrowMarkers: [],
+    parkingLayerMap: {},
+    parkingBoundsMap: {},
+    insightLayerMap: {},
+
+    layers: { parking: true, traffic: true, insights: true, shuttle: true },
+
+    layerDefs: [
+      { key: 'parking',  label: '주차장 현황',    color: '#10b981' },
+      { key: 'traffic',  label: '교통 흐름',      color: '#60a5fa' },
+      { key: 'insights', label: '위험 구간',      color: '#f59e0b' },
+      { key: 'shuttle',  label: '셔틀 정류장',    color: '#a78bfa' },
+    ],
+
+    lots: [
+      { id:'P1', name:'공과대학 주차장',    total:180, occ:148, ev:4, shuttle:false, status:'peak' },
+      { id:'P2', name:'사회과학대학 주차장', total:120, occ:75,  ev:2, shuttle:false, status:'moderate' },
+      { id:'P3', name:'사범대학 주차장',    total:95,  occ:32,  ev:2, shuttle:true,  status:'empty' },
+      { id:'P4', name:'본관·행정동 주차장', total:200, occ:170, ev:6, shuttle:true,  status:'peak' },
+      { id:'P5', name:'학생복지관 주차장',  total:80,  occ:48,  ev:2, shuttle:true,  status:'moderate' },
+    ],
+
+    gates: [
+      { id:'G1', name:'정문 (正門)', dir:'하양읍 방면', cong:'high' },
+      { id:'G2', name:'동문 (東門)', dir:'내리리 방면', cong:'mid' },
+      { id:'G3', name:'서문 (西門)', dir:'우회 진입',   cong:'low' },
+    ],
+
+    insights: [
+      { id:'I1', loc:'복지관 앞 횡단보도',   risk:'critical', rec:'신호등 또는 15 km/h 감속 구간. 연간 3건 사고 기록.' },
+      { id:'I2', loc:'중앙–동문 도로 병목',  risk:'high',     rec:'수업 전환 10분 집중 혼잡. VMS 안내판 도입 검토.' },
+      { id:'I3', loc:'정문 분기 사거리',     risk:'high',     rec:'진입 분기점 혼잡. 교통 유도원 배치 필요.' },
+      { id:'I4', loc:'서문 경사로',          risk:'moderate', rec:'동절기 결빙 위험. 열선·염화칼슘 살포 장치 검토.' },
+    ],
+
+    get totalSpaces() { return this.lots.reduce((s, l) => s + l.total, 0); },
+    get totalOcc()    { return this.lots.reduce((s, l) => s + l.occ,   0); },
+    get satPct()      { return Math.round(this.totalOcc / this.totalSpaces * 100); },
+
+    // ── 초기화 ────────────────────────────────────────────────────────────
+    init() {
+      this.tick();
+      setInterval(() => this.tick(), 60000);
+      this.bindKeys();
+      this.$nextTick(() => this.buildMap());
+    },
+
+    tick() {
+      const d = new Date();
+      this.clock   = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      this.dateStr = d.toLocaleDateString('ko-KR', { month:'long', day:'numeric', weekday:'short' });
+      const t = d.getHours() * 60 + d.getMinutes();
+      const was = this.isPeak;
+      this.isPeak = (t >= 510 && t <= 570) || (t >= 1050 && t <= 1110);
+      if (!was && this.isPeak) this.toast('혼잡시간 시작 — 서문 우회 경로를 이용하세요', 'warn');
+    },
+
+    bindKeys() {
+      window.addEventListener('keydown', e => {
+        if (e.target.matches('input,textarea,select')) return;
+        if (e.key === '[')                     this.toggleSidebar();
+        if (e.key.toLowerCase() === 'r')       this.resetView();
+        if (e.key.toLowerCase() === 'l')       this.locateMe();
+      });
+    },
+
+    toast(msg, type = '') {
+      const area = document.getElementById('toast-area');
+      const el   = document.createElement('div');
+      el.className = 'toast' + (type ? ' ' + type : '');
+      el.textContent = msg;
+      area.appendChild(el);
+      setTimeout(() => el.remove(), 3100);
+    },
+
+    toggleSidebar() {
+      this.open = !this.open;
+      setTimeout(() => this.mapObj?.invalidateSize(), 240);
+    },
+
+    toggleLayer(name) {
+      this.layers[name] = !this.layers[name];
+      const lg = this.mapLayers[name];
+      if (!lg) return;
+      this.layers[name] ? this.mapObj.addLayer(lg) : this.mapObj.removeLayer(lg);
+      if (name === 'traffic') {
+        this.arrowMarkers.forEach(m =>
+          this.layers.traffic ? this.mapObj.addLayer(m) : this.mapObj.removeLayer(m)
+        );
+      }
+    },
+
+    resetView() {
+      this.mapObj?.flyTo(CAMPUS_CENTER, 16, { duration: 0.8 });
+    },
+
+    locateMe() {
+      if (!this.mapObj) return;
+      this.mapObj.locate({ setView: true, maxZoom: 17 });
+      this.mapObj.once('locationerror', () => this.toast('위치를 확인할 수 없습니다', 'warn'));
+    },
+
+    focusParking(id) {
+      const bounds = this.parkingBoundsMap[id];
+      if (!bounds) return;
+      this.mapObj.flyToBounds(bounds, { padding:[60,60], duration:0.6 });
+      const lyr = this.parkingLayerMap[id];
+      if (lyr) setTimeout(() => lyr.openPopup(), 700);
+    },
+
+    focusInsight(id) {
+      const lyr = this.insightLayerMap[id];
+      if (!lyr) return;
+      this.mapObj.flyTo(lyr.getLatLng(), 17, { duration: 0.6 });
+      setTimeout(() => lyr.openPopup(), 700);
+    },
+
+    // ── 지도 생성 ─────────────────────────────────────────────────────────
+    buildMap() {
+      this.mapObj = L.map('map', {
+        center: CAMPUS_CENTER, zoom: 16,
+        minZoom: 14, maxZoom: 19,
+        maxBounds: L.latLngBounds(MAX_BOUNDS).pad(0.1),
+        maxBoundsViscosity: 0.85,
+        zoomControl: false,
+      });
+
+      L.control.zoom({ position: 'topright' }).addTo(this.mapObj);
+      L.control.scale({ metric: true, imperial: false, position: 'bottomright' }).addTo(this.mapObj);
+
+      L.tileLayer(
+        'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+        { attribution: '© <a href="https://openstreetmap.org">OSM</a> © <a href="https://carto.com">CARTO</a>', subdomains: 'abcd', maxZoom: 19 }
+      ).addTo(this.mapObj);
+
+      // 캠퍼스 배경 이미지
+      this.mapObj.createPane('bgOverlay');
+      this.mapObj.getPane('bgOverlay').style.zIndex = 250;
+
+      // 건물 라벨 전용 pane (이미지 위, 벡터 아래)
+      this.mapObj.createPane('labelsPane');
+      this.mapObj.getPane('labelsPane').style.zIndex = 420;
+      this.mapObj.getPane('labelsPane').style.pointerEvents = 'none';
+
+      const img = L.imageOverlay('background_warped.png', OVERLAY_BOUNDS, {
+        pane: 'bgOverlay', opacity: 1.0, interactive: false,
+        className: 'floating-map-card'
+      }).addTo(this.mapObj);
+
+      const hide = () => document.getElementById('loading').classList.add('done');
+      img.on('load', hide);
+      img.on('error', hide);
+      setTimeout(hide, 2200);
+
+      this.addParkingLayer();
+      this.addTrafficLayer();
+      this.addInsightLayer();
+      this.addShuttleLayer();
+      this.addGateMarkers();
+      this.addBuildingLabels();
+    },
+
+    // ── 주차장 레이어 ─────────────────────────────────────────────────────
+    addParkingLayer() {
+      const col = s =>
+        s === 'peak'     ? { fill:'rgba(239,68,68,.28)',  stroke:'#ef4444' } :
+        s === 'moderate' ? { fill:'rgba(245,158,11,.28)', stroke:'#f59e0b' } :
+                           { fill:'rgba(16,185,129,.28)', stroke:'#10b981' };
+
+      const self = this;
+      const layer = L.geoJSON(PARKING_GEOJSON, {
+        style(f) {
+          const c = col(f.properties.status);
+          return { fillColor: c.fill, fillOpacity: 1, color: c.stroke, weight: 2 };
+        },
+        onEachFeature(f, lyr) {
+          const p   = f.properties;
+          const pct = Math.round(p.occ / p.total * 100);
+          const sKr = p.status==='peak'?'혼잡':p.status==='moderate'?'보통':'여유';
+          const sCol= p.status==='peak'?'#ef4444':p.status==='moderate'?'#f59e0b':'#10b981';
+          lyr.bindPopup(`
+            <div class="pu-title">${p.name}</div>
+            <div class="pu-row"><span class="pu-key">구역</span><span class="pu-val">${p.zone}</span></div>
+            <div class="pu-row"><span class="pu-key">전체 주차면</span><span class="pu-val">${p.total} 면</span></div>
+            <div class="pu-row"><span class="pu-key">현재 사용</span><span class="pu-val">${p.occ} 면</span></div>
+            <div class="pu-row"><span class="pu-key">포화율</span><span class="pu-val" style="color:${sCol}">${pct}% · ${sKr}</span></div>
+            <div class="pu-bar"><div class="pu-bar-f" style="width:${pct}%;background:${sCol}"></div></div>
+            <div class="pu-row"><span class="pu-key">장애인 구역</span><span class="pu-val">${p.disabled} 면</span></div>
+            <div class="pu-row"><span class="pu-key">EV 충전기</span><span class="pu-val">${p.ev} 기</span></div>
+            <div class="pu-row"><span class="pu-key">셔틀 정류장</span><span class="pu-val">${p.shuttle?'있음':'없음'}</span></div>
+            <div class="pu-note"><span class="pu-nl">혼잡 시간대</span>${p.peak_hours.join(' · ')}</div>
+            <div class="pu-note"><span class="pu-nl">권장 진입 게이트</span>${p.gates.join(' · ')}</div>
+          `, { maxWidth: 260 });
+
+          lyr.on('mouseover', () => lyr.setStyle({ weight:3, fillOpacity:0.55 }));
+          lyr.on('mouseout',  () => layer.resetStyle(lyr));
+
+          // 사이드바 포커스용 참조 저장
+          self.parkingLayerMap[p.id]  = lyr;
+          self.parkingBoundsMap[p.id] = lyr.getBounds();
+        }
+      });
+
+      this.mapLayers['parking'] = layer;
+      layer.addTo(this.mapObj);
+    },
+
+    // ── 교통 레이어 ───────────────────────────────────────────────────────
+    addTrafficLayer() {
+      const rCol = r => r >= 2.0 ? '#ef4444' : r >= 1.5 ? '#f59e0b' : r < 0.9 ? '#10b981' : '#60a5fa';
+      const rLbl = r => r >= 2.0 ? '고위험' : r >= 1.5 ? '주의' : r < 0.9 ? '안전(우회)' : '보통';
+
+      const layer = L.geoJSON(TRAFFIC_GEOJSON, {
+        style(f) {
+          const r  = f.properties.risk;
+          const ow = f.properties.one_way;
+          return { color: rCol(r), weight: ow ? 3.5 : 2.5, opacity: 0.9, dashArray: ow ? '12 6' : null };
+        },
+        onEachFeature(f, lyr) {
+          const p = f.properties;
+          const c = rCol(p.risk);
+          lyr.bindPopup(`
+            <div class="pu-title">${p.name}</div>
+            <div class="pu-row"><span class="pu-key">통행 방향</span><span class="pu-val">${p.dir}</span></div>
+            <div class="pu-row"><span class="pu-key">위험 지수</span><span class="pu-val" style="color:${c}">${p.risk.toFixed(1)} · ${rLbl(p.risk)}</span></div>
+            <div class="pu-row"><span class="pu-key">혼잡도</span><span class="pu-val">${p.vol}</span></div>
+            <div class="pu-note">${p.desc}</div>
+          `, { maxWidth: 260 });
+
+          // 일방통행 대시 애니메이션
+          if (f.properties.one_way) {
+            lyr.on('add', () => {
+              const el = lyr.getElement && lyr.getElement();
+              if (el) el.classList.add('ow-animated');
+            });
+          }
+        }
+      });
+
+      // 방향 화살표 — 90 - deg 로 CSS 회전 (정방향 수정)
+      const arrows = [];
+      TRAFFIC_GEOJSON.features.forEach(f => {
+        const coords = f.geometry.coordinates;
+        const pts = coords.length >= 3
+          ? [Math.floor(coords.length / 3), Math.floor(2 * coords.length / 3)]
+          : [Math.floor(coords.length / 2)];
+
+        pts.forEach(mi => {
+          if (mi < 1 || mi >= coords.length) return;
+          const [ax, ay] = coords[mi];
+          const [bx, by] = coords[mi - 1];
+          const deg = Math.atan2(ay - by, ax - bx) * 180 / Math.PI;
+          const rot = 90 - deg;
+          const col = rCol(f.properties.risk);
+
+          const icon = L.divIcon({
+            html: `<div style="transform:rotate(${rot}deg);pointer-events:none;line-height:1;text-shadow:0 0 4px #000a;">
+                     <svg width="12" height="14" viewBox="0 0 12 14" fill="${col}" opacity=".9">
+                       <polygon points="6,0 12,14 6,10 0,14"/>
+                     </svg>
+                   </div>`,
+            className: '', iconSize: [12, 14], iconAnchor: [6, 7],
+          });
+          const m = L.marker([ay, ax], { icon, interactive: false });
+          m.addTo(this.mapObj);
+          arrows.push(m);
+        });
+      });
+
+      this.arrowMarkers = arrows;
+      this.mapLayers['traffic'] = layer;
+      layer.addTo(this.mapObj);
+    },
+
+    // ── 인사이트 레이어 ───────────────────────────────────────────────────
+    addInsightLayer() {
+      const iCol = r => r==='critical'?'#ef4444':r==='high'?'#f97316':r==='moderate'?'#f59e0b':'#10b981';
+      const iLbl = r => r==='critical'?'최고위험':r==='high'?'위험':r==='moderate'?'주의':'안전/대안';
+      const self = this;
+
+      const layer = L.geoJSON(INSIGHT_GEOJSON, {
+        pointToLayer(f, ll) {
+          const col = iCol(f.properties.risk);
+          const pulse = f.properties.risk === 'critical'
+            ? `<div style="position:absolute;inset:-7px;border-radius:50%;border:2px solid ${col};animation:pulse-ring 1.8s ease-out infinite;"></div>` : '';
+          const icon = L.divIcon({
+            html: `<div style="position:relative;width:28px;height:28px;">
+                     ${pulse}
+                     <div style="width:28px;height:28px;border-radius:50%;
+                       background:${col}18;border:2px solid ${col};
+                       display:flex;align-items:center;justify-content:center;
+                       color:${col};font-weight:900;font-size:13px;
+                       box-shadow:0 0 12px ${col}44;cursor:pointer;
+                       font-family:'JetBrains Mono',monospace;">!</div>
+                   </div>`,
+            className: '', iconSize: [28, 28], iconAnchor: [14, 14],
+          });
+          return L.marker(ll, { icon });
+        },
+        onEachFeature(f, lyr) {
+          const p = f.properties;
+          const col = iCol(p.risk);
+          lyr.bindPopup(`
+            <div class="pu-title" style="color:${col}">⚠ ${p.loc}</div>
+            <div class="pu-row"><span class="pu-key">이슈 유형</span><span class="pu-val">${p.type}</span></div>
+            <div class="pu-row"><span class="pu-key">위험 등급</span><span class="pu-val" style="color:${col}">${iLbl(p.risk)}</span></div>
+            <div class="pu-row"><span class="pu-key">충돌 지수</span><span class="pu-val">${p.ci}</span></div>
+            <div class="pu-row"><span class="pu-key">연간 사고</span><span class="pu-val">${p.incidents} 건</span></div>
+            <div class="pu-note"><span class="pu-nl">혼잡 시간대</span>${p.peak.join('<br>')}</div>
+            <div class="pu-note"><span class="pu-nl">전문가 권고</span>${p.rec}</div>
+          `, { maxWidth: 280 });
+          self.insightLayerMap[p.id] = lyr;
+        }
+      });
+
+      this.mapLayers['insights'] = layer;
+      layer.addTo(this.mapObj);
+    },
+
+    // ── 셔틀 레이어 ───────────────────────────────────────────────────────
+    addShuttleLayer() {
+      const group = L.layerGroup();
+      SHUTTLE_STOPS.forEach(s => {
+        const icon = L.divIcon({
+          html: `<div style="background:#161b22;border:1.5px solid #a78bfa;color:#a78bfa;
+                   font-size:9px;font-weight:700;font-family:'JetBrains Mono',monospace;
+                   padding:3px 7px;white-space:nowrap;border-radius:2px;
+                   box-shadow:0 2px 8px #0009;letter-spacing:.05em;">BUS</div>`,
+          className: '', iconAnchor: [20, 10],
+        });
+        L.marker(s.ll, { icon, zIndexOffset: 400 })
+          .addTo(group)
+          .bindPopup(`
+            <div class="pu-title">${s.name}</div>
+            <div class="pu-row"><span class="pu-key">운행 노선</span><span class="pu-val">${s.routes.join(', ')}</span></div>
+            <div class="pu-row"><span class="pu-key">배차 간격</span><span class="pu-val">${s.interval}분</span></div>
+            <div class="pu-note">캠퍼스 순환 셔틀버스 정류장입니다.<br>학기 중 평일 운영.</div>
+          `, { maxWidth: 220 });
+      });
+      this.mapLayers['shuttle'] = group;
+      group.addTo(this.mapObj);
+    },
+
+    // ── 출입문 마커 ───────────────────────────────────────────────────────
+    addGateMarkers() {
+      const gates = [
+        { name:'정문', ll:[35.8836, 128.7577], desc:'남단 메인 출입구 · 하양읍 방면', cong:'high' },
+        { name:'동문', ll:[35.8900, 128.7652], desc:'동측 출입구 · 내리리 방면',     cong:'mid' },
+        { name:'서문', ll:[35.8886, 128.7507], desc:'서측 출입구 · 우회 진입',       cong:'low' },
+      ];
+      const congColor = { high:'#ef4444', mid:'#f59e0b', low:'#10b981' };
+      const congLabel = { high:'혼잡', mid:'보통', low:'원활' };
+
+      gates.forEach(g => {
+        const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${congColor[g.cong]};margin-right:4px;vertical-align:middle;"></span>`;
+        const icon = L.divIcon({
+          html: `<div style="background:#161b22;border:1.5px solid #1f6feb;color:#e6edf3;
+                   font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace;
+                   padding:3px 8px;white-space:nowrap;border-radius:2px;
+                   box-shadow:0 2px 10px #0009;letter-spacing:.06em;">${g.name}</div>`,
+          className: '', iconAnchor: [22, 12],
+        });
+        L.marker(g.ll, { icon, zIndexOffset: 500 })
+          .addTo(this.mapObj)
+          .bindPopup(`
+            <div class="pu-title">${g.name} 출입구</div>
+            <div class="pu-row"><span class="pu-key">위치</span><span class="pu-val">${g.desc}</span></div>
+            <div class="pu-row"><span class="pu-key">혼잡도</span>
+              <span class="pu-val" style="color:${congColor[g.cong]}">${dot}${congLabel[g.cong]}</span></div>
+          `, { maxWidth: 220 });
+      });
+    },
+
+    // ── 건물 라벨 ─────────────────────────────────────────────────────────
+    addBuildingLabels() {
+      BUILDINGS.forEach(b => {
+        L.marker(b.ll, {
+          icon: L.divIcon({ html:'', className:'', iconSize:[0,0] }),
+          pane: 'labelsPane', interactive: false,
+        })
+        .addTo(this.mapObj)
+        .bindTooltip(b.name, {
+          permanent: true, direction: 'center',
+          className: 'bld-label', offset: [0, 0],
+          pane: 'labelsPane',
+        });
+      });
+    },
+
+  })); // Alpine.data
+}); // alpine:init
+</script>
+</body>
+</html>
