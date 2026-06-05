@@ -344,14 +344,12 @@
       #sidebar { position: relative; width: 230px; height: auto; float: left; box-shadow: none; }
       #map     { position: relative; width: calc(100% - 240px); height: 520px; float: left; }
     }
-        leaflet-image-layer,
+     .leaflet-image-layer,
     .leaflet-layer img {
-        max-width: none !important;
-        width: auto !important;
-        height: auto !important;
-        box-shadow: none !important;     
-        background-color: transparent !important;
-        border: none !important;
+      max-width: none !important;
+      box-shadow: none !important;
+      background-color: transparent !important;
+      border: none !important;
     }
   </style>
 </head>
@@ -877,12 +875,13 @@ document.addEventListener('alpine:init', () => {
 
     // ── 지도 생성 ─────────────────────────────────────────────────────────
     buildMap() {
-      this.mapObj = L.map('map', {
+      this.mapObj = L.map('map', { 
         center: CAMPUS_CENTER, zoom: 16,
         minZoom: 14, maxZoom: 19,
         maxBounds: L.latLngBounds(MAX_BOUNDS).pad(0.1),
         maxBoundsViscosity: 0.85,
         zoomControl: false,
+        
       });
 
       L.control.zoom({ position: 'topright' }).addTo(this.mapObj);
